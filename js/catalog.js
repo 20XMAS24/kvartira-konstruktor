@@ -81,6 +81,12 @@
   add('Балкон', 'balctable', 'Столик 60×40', 60, 40, 72, 'furniture', 'table', SAGE);
   add('Балкон', 'dryer', 'Сушилка', 120, 50, 100, 'furniture', 'table', BLUE, { loose: true });
 
+  // Свет: источник света появляется в 3D вместе с предметом
+  const LAMP = '#e8d9b8';
+  add('Свет', 'floorlamp', 'Торшер', 36, 36, 165, 'furniture', 'lamp', LAMP, { hug: false, loose: true });
+  add('Свет', 'tablelamp', 'Настольная лампа', 22, 22, 42, 'furniture', 'lamp', LAMP, { hug: false, loose: true, z: 75 });
+  add('Свет', 'pendant', 'Подвесной светильник', 40, 40, 34, 'furniture', 'lamp', LAMP, { hug: false, loose: true, z: 205 });
+
   // Свои точки: розетки там, где ещё нет замеров
   add('Свои замеры', 'outlet30', 'Розетка низкая', 8, 3, 8, 'point', 'outlet', '#d9542b', { z: 30 });
   add('Свои замеры', 'outlet110', 'Розетка над столешницей', 8, 3, 8, 'point', 'outlet', '#d9542b', { z: 111 });

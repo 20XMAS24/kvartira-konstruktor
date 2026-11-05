@@ -94,6 +94,21 @@ select, input[type=number], input[type=text], input[type=search] {
   position: absolute; display: flex; gap: 3px; padding: 3px; background: rgba(251, 250, 247, .95);
   border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.18); z-index: 5;
 }
+.walk-hud { position: absolute; inset: 0; pointer-events: none; z-index: 6; }
+.walk-top {
+  position: absolute; left: 8px; right: 8px; top: 8px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px;
+  padding: 5px 8px; color: #fff; background: rgba(20, 22, 24, .62); border-radius: 8px; font-size: 13px;
+}
+.walk-where { font-weight: 600; }
+.walk-help { flex: 1; opacity: .85; font-size: 12px; }
+.walk-top button { pointer-events: auto; color: var(--ink); }
+.walk-pad { position: absolute; left: 12px; bottom: 12px; display: none; grid-template-columns: repeat(3, 46px); grid-template-rows: repeat(2, 46px); gap: 4px; }
+.walk-pad button { pointer-events: auto; touch-action: none; background: rgba(251, 250, 247, .78); font-size: 16px; padding: 0; }
+.walk-pad [data-k="KeyW"] { grid-column: 2; grid-row: 1; }
+.walk-pad [data-k="KeyA"] { grid-column: 1; grid-row: 2; }
+.walk-pad [data-k="KeyS"] { grid-column: 2; grid-row: 2; }
+.walk-pad [data-k="KeyD"] { grid-column: 3; grid-row: 2; }
+@media (pointer: coarse) { .walk-pad { display: grid; } .walk-help { display: none; } }
 .d3-tools button { padding: 3px 8px; font-size: 12px; white-space: nowrap; touch-action: none; }
 .d3-tools [data-a="lift"] { cursor: ns-resize; }
 .d3 .msg { padding: 24px; color: var(--muted); }

@@ -3,6 +3,7 @@
 // Система предмета: центр в нуле, x — ширина, z — глубина (спинка при -z, фасад при +z), y вверх от 0.
 (function () {
   const useAssets = location.protocol !== 'file:'; // с file:// браузер не отдаёт текстуры в WebGL
+  const APT_CEIL = 254;
   const manager = new THREE.LoadingManager();
   const texLoader = new THREE.TextureLoader(manager);
   const gltfLoader = new THREE.GLTFLoader();
@@ -250,6 +251,20 @@
       [-1, 1].forEach((a) => box(g, 14, 50, it.d, a * (it.w / 2 - 7), 10, 0, f));
       [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([a, b]) => box(g, 5, 10, 5, a * (it.w / 2 - 6), 0, b * (it.d / 2 - 6), M.plinth()));
     },
+    lamp(g, it) {
+      const shade = mat(`shade|${it.color}`, () => std({ color: new THREE.Color(it.color), emissive: new THREE.Color(0xffc98a), emissiveIntensity: 0.9, roughness: 0.7 }));
+      const dark = M.handle();
+      const r = it.w / 2;
+      if (it.z >= 150) { // подвес: шнур до потолка и плафон
+        cyl(g, 0.5, Math.max(APT_CEIL - it.z, it.h), 0, 0, 0, dark);
+        cyl(g, r, r * 0.9, 0, 0, 0, shade, { r2: r * 0.35 });
+        return;
+      }
+      const shadeH = Math.max(14, it.h * 0.18);
+      cyl(g, r * 0.6, 2, 0, 0, 0, dark);
+      cyl(g, 0.9, it.h - shadeH, 0, 2, 0, dark, { seg: 12 });
+      cyl(g, r, shadeH, 0, it.h - shadeH, 0, shade, { r2: r * 0.65 });
+    },
     outlet(g, it) {
       box(g, it.w, it.h, it.d, 0, 0, 0, M.enamel());
       cyl(g, it.w * 0.32, 0.6, 0, it.h / 2, it.d / 2 + 0.1, M.whiteMatte(), { axis: 'z' });
@@ -327,6 +342,6 @@
     g.traverse((o) => { if (o.isMesh && !o.userData.shared && o.geometry) o.geometry.dispose(); });
   }
 
-  window.Models3D = { build, dispose, signature, tex, M, box, std, useAssets, setOnChange: (f) => { onChange = f; }, setTheme: (t) => { theme = t; } };
+  window.Models3D = { build, dispose, signature, tex, M, box, std, useAssets, ENV, setOnChange: (f) => { onChange = f; }, setTheme: (t) => { theme = t; } };
   manager.onLoad = () => onChange();
 })();

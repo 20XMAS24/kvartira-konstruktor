@@ -212,3 +212,15 @@ test('у каждой привязанной модели есть файл и �
     assert.ok(fs.existsSync(path.join(__dirname, '..', 'assets/models', `${m.file}.glb`)), m.file);
   }
 });
+
+test('прогулка: в проходе можно стоять, в стене и мебели нельзя', () => {
+  assert.ok(Geo.canStand(APT, [], 135, 200), 'центр кухни');
+  assert.ok(!Geo.canStand(APT, [], 274, 200), 'стена между кухней и комнатой');
+  assert.ok(Geo.canStand(APT, [], 209, 390), 'дверной проём кухни');
+  assert.ok(!Geo.canStand(APT, [], 251, 606), 'входная дверь закрыта');
+  assert.ok(!Geo.canStand(APT, [], 420, -150), 'окно');
+  assert.ok(!Geo.canStand(APT, [make('fridge60', 100, 180)], 135, 210), 'холодильник');
+  assert.ok(Geo.canStand(APT, [make('upper60', 100, 180, 0, { z: 195 })], 135, 210), 'шкаф выше головы');
+  assert.ok(!Geo.canStand(APT, [make('upper60', 100, 180)], 135, 210), 'шкаф на уровне головы');
+  assert.ok(Geo.canStand(APT, [make('floorlamp', 120, 190)], 135, 210), 'торшер не преграда');
+});

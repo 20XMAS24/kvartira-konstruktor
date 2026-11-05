@@ -1,8 +1,10 @@
 // 3D-сцена: реалистичный показ и редактирование мышью. 1 единица = 1 см; x как на плане, z = y плана, y вверх.
 (function () {
   const ACCENT = 0x1f8f9b, RED = 0xd8452b, AMBER = 0xd9920a;
-  const state = { ready: false, failed: false, cut: 254, autoHide: true, theme: null, hideDist: 285 };
-  let renderer, scene, camera, host, staticG, itemsG, marker, sun, tools;
+  const state = { ready: false, failed: false, cut: 254, autoHide: true, theme: null, hideDist: 285, mode: 'day', lampPower: 1, shaders: true, walking: false };
+  let renderer, scene, camera, host, staticG, itemsG, marker, sun, tools, hud, sky, fsScene, fsCam, post, mainRT, depthRT, depthMat;
+  const roomLights = [], itemLights = [];
+  let shadowDirty = true;
   let handlers = {};
   let lastItems = [], selectedId = null;
   const orbit = { theta: 0.45, phi: 0.6, dist: 1120, target: null };
@@ -49,6 +51,8 @@
     staticG = new THREE.Group();
     itemsG = new THREE.Group();
     scene.add(staticG, itemsG);
+    setupLights();
+    setupPost();
 
     marker = new THREE.Group();
     marker.visible = false;
@@ -70,7 +74,11 @@
     tools.innerHTML = '<button data-a="rotate" title="Клавиша R">Повернуть</button><button data-a="lift" title="Тяните вверх или вниз">Выше / ниже</button><button data-a="dup">Копия</button><button data-a="del" class="danger">Удалить</button>';
     el.appendChild(tools);
     bindTools();
+    hud = buildHud();
+    el.appendChild(hud);
     bindControls(renderer.domElement);
+    bindWalk(renderer.domElement);
+    applyLighting();
     Models3D.setOnChange(() => { if (state.ready) { update(lastItems, selectedId); } });
     new ResizeObserver(() => { resize(); draw(); }).observe(el);
     state.ready = true;
@@ -83,6 +91,12 @@
     const w = host.clientWidth, h = host.clientHeight;
     if (!w || !h) return;
     renderer.setSize(w, h);
+    if (mainRT) {
+      const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+      mainRT.setSize(size.x, size.y);
+      depthRT.setSize(size.x, size.y);
+      post.uniforms.resolution.value.copy(size);
+    }
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
   }
@@ -141,7 +155,8 @@
       if (c.geometry) c.geometry.dispose();
     }
     walls = [];
-    const cut = state.cut;
+    shadowDirty = true;
+    const cut = state.walking ? APT.CEILING : state.cut;
     const theme = state.theme;
     const plaster = theme ? Models3D.M.paint(theme.walls) : Models3D.M.whiteMatte();
     const frame = Models3D.M.enamel();
@@ -202,6 +217,22 @@
       } else wallBox(x0, y0, x1, y1, f.z, Math.min(f.z + f.h, cut), Models3D.M.paint('#d9d6cf'), false);
     });
 
+    // Потолок виден и даёт тень только на прогулке: иначе закрывал бы вид сверху.
+    const ceilingMat = new THREE.MeshStandardMaterial({ color: 0xf6f5f1, roughness: 0.95, side: THREE.DoubleSide, envMapIntensity: Models3D.ENV });
+    APT.rooms.forEach((r, i) => {
+      const c = new THREE.Mesh(floorGeometry(r.poly), ceilingMat);
+      c.position.y = APT.CEILING;
+      c.visible = state.walking;
+      c.castShadow = true;
+      staticG.add(c);
+      const l = roomLights[i];
+      if (r.id !== 'balcony' && state.walking && l) {
+        const fixture = new THREE.Mesh(new THREE.CylinderGeometry(15, 15, 5, 28), lampFixtureMaterial());
+        fixture.position.set(l.position.x, APT.CEILING - 2.5, l.position.z);
+        staticG.add(fixture);
+      }
+    });
+
     const plate = Models3D.M.enamel();
     APT.outlets.forEach((p) => {
       if (p.h >= cut) return;
@@ -238,7 +269,10 @@
     for (const [id, e] of entries) {
       if (!keep.has(id)) { itemsG.remove(e.group); Models3D.dispose(e.group); entries.delete(id); }
     }
-    const sel = items.find((i) => i.id === selId);
+    syncItemLights(items);
+    shadowDirty = true;
+    syncEnv();
+    const sel = state.walking ? null : items.find((i) => i.id === selId);
     marker.visible = !!sel;
     if (sel) {
       const b = Geo.box(sel);
@@ -253,6 +287,7 @@
 
   // Срез: стены между камерой и центром вида прячутся, иначе за ними ничего не видно.
   function applyAutoHide() {
+    if (state.walking) { for (const m of walls) m.visible = true; return; }
     const { target } = orbit;
     let dx = camera.position.x - target.x, dz = camera.position.z - target.z;
     const len = Math.hypot(dx, dz) || 1;
@@ -260,27 +295,35 @@
     const top = orbit.phi < 0.25;
     for (const m of walls) {
       const p = (m.position.x - target.x) * dx + (m.position.z - target.z) * dz;
-      m.visible = !state.autoHide || top || p < state.hideDist;
+      const v = !state.autoHide || top || p < state.hideDist;
+      if (m.visible !== v) { m.visible = v; shadowDirty = true; }
     }
   }
 
   function draw() {
     if (!state.ready) return;
-    const { theta, phi, dist, target } = orbit;
-    camera.position.set(
-      target.x + dist * Math.sin(phi) * Math.sin(theta),
-      target.y + dist * Math.cos(phi),
-      target.z + dist * Math.sin(phi) * Math.cos(theta),
-    );
-    camera.lookAt(target);
+    if (state.walking) {
+      camera.position.set(walk.x, walk.eye, walk.y);
+      camera.rotation.set(walk.pitch, walk.yaw, 0, 'YXZ');
+    } else {
+      const { theta, phi, dist, target } = orbit;
+      camera.position.set(
+        target.x + dist * Math.sin(phi) * Math.sin(theta),
+        target.y + dist * Math.cos(phi),
+        target.z + dist * Math.sin(phi) * Math.cos(theta),
+      );
+      camera.lookAt(target);
+    }
     applyAutoHide();
-    renderer.render(scene, camera);
+    renderer.shadowMap.needsUpdate = shadowDirty;
+    shadowDirty = false;
+    renderFrame();
     placeTools();
   }
 
   function placeTools() {
     const sel = lastItems.find((i) => i.id === selectedId);
-    if (!sel || !tools || !host) { if (tools) tools.hidden = true; return; }
+    if (!sel || !tools || !host || state.walking) { if (tools) tools.hidden = true; return; }
     const b = Geo.box(sel);
     const v = new THREE.Vector3((b.x0 + b.x1) / 2, (sel.z || 0) + sel.h + 6, (b.y0 + b.y1) / 2).project(camera);
     const W = host.clientWidth, H = host.clientHeight;
@@ -318,6 +361,7 @@
     dom.addEventListener('contextmenu', (e) => e.preventDefault());
     dom.addEventListener('pointerdown', (e) => {
       dom.setPointerCapture(e.pointerId);
+      if (state.walking) return;
       pts.set(e.pointerId, [e.clientX, e.clientY]);
       pinch = null;
       if (pts.size === 2) { mode = mode && mode.type === 'item' ? mode : null; return; }
@@ -334,6 +378,7 @@
       }
     });
     dom.addEventListener('pointermove', (e) => {
+      if (state.walking) return;
       if (!pts.has(e.pointerId)) {
         if (!mode && e.pointerType === 'mouse') dom.style.cursor = pick(e.clientX, e.clientY) ? 'grab' : 'default';
         return;
@@ -380,6 +425,7 @@
     dom.addEventListener('pointercancel', up);
     dom.addEventListener('wheel', (e) => {
       e.preventDefault();
+      if (state.walking) return;
       orbit.dist = clamp(orbit.dist * Math.exp(e.deltaY * 0.001), 150, 3000);
       draw();
     }, { passive: false });
@@ -406,6 +452,255 @@
     tools.addEventListener('pointerup', end);
     tools.addEventListener('pointercancel', end);
   }
+
+  /* ---------- Свет ---------- */
+  const MODES = {
+    day: { sun: 1.35, sunColor: 0xfff3e0, env: 1, exposure: 0.92, warmth: 0, lamps: 0, itemLamps: 0.25, top: 0x6fa8dc, horizon: 0xdcebf5, ground: 0xb9b5a8, clear: 0xe9e6df },
+    evening: { sun: 0.7, sunColor: 0xff9d5c, env: 0.42, exposure: 0.95, warmth: 0.8, lamps: 0.6, itemLamps: 0.8, top: 0x3d4a78, horizon: 0xf0a26a, ground: 0x4d4640, clear: 0x8d8074 },
+    night: { sun: 0, sunColor: 0x8fa8d0, env: 0.1, exposure: 1.05, warmth: 0.5, lamps: 0.85, itemLamps: 1, top: 0x050814, horizon: 0x1a2238, ground: 0x07080c, clear: 0x23252c },
+  };
+  function setupLights() {
+    renderer.shadowMap.autoUpdate = false;
+    APT.rooms.forEach((r) => {
+      const b = Geo.polyBox(r.poly);
+      const l = new THREE.PointLight(0xffd9ab, 0, r.id === 'room' ? 760 : 560, 1.6);
+      l.position.set((b.x0 + b.x1) / 2, APT.CEILING - 14, r.id === 'hall' ? 490 : (b.y0 + b.y1) / 2);
+      l.castShadow = r.id !== 'balcony';
+      l.shadow.mapSize.set(512, 512);
+      l.shadow.camera.near = 5;
+      l.shadow.camera.far = 800;
+      l.shadow.bias = -0.004;
+      l.shadow.normalBias = 1;
+      scene.add(l);
+      roomLights.push(l);
+    });
+    // Пул заранее: число источников не меняется, поэтому шейдеры не пересобираются при добавлении лампы.
+    for (let i = 0; i < 6; i++) {
+      const l = new THREE.PointLight(0xffcf9c, 0, 420, 1.8);
+      scene.add(l);
+      itemLights.push(l);
+    }
+  }
+  const lampFixtureMaterial = () => mat3dFixture();
+  let fixtureMat = null;
+  function mat3dFixture() {
+    if (!fixtureMat) fixtureMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffe2bd, emissiveIntensity: 0, roughness: 0.5 });
+    return fixtureMat;
+  }
+  function syncItemLights(items) {
+    const m = MODES[state.mode];
+    const lamps = items.filter((i) => i.kind === 'lamp');
+    itemLights.forEach((l, i) => {
+      const it = lamps[i];
+      if (!it) { l.intensity = 0; return; }
+      const b = Geo.box(it);
+      l.position.set((b.x0 + b.x1) / 2, (it.z || 0) + it.h * 0.75, (b.y0 + b.y1) / 2);
+      l.intensity = m.itemLamps * state.lampPower;
+    });
+  }
+  // Доля света окружения зависит от режима: ночью стены не должны светиться сами.
+  function syncEnv() {
+    const k = Models3D.ENV * MODES[state.mode].env;
+    scene.traverse((o) => {
+      if (o.isMesh && o.material && 'envMapIntensity' in o.material) o.material.envMapIntensity = k;
+    });
+  }
+  function applyLighting() {
+    const m = MODES[state.mode];
+    sun.intensity = m.sun;
+    sun.color.setHex(m.sunColor);
+    sun.position.set(...(state.walking ? [-90, 430, -760] : [-260, 800, -520]));
+    if (state.mode === 'evening') sun.position.set(-620, 300, -520);
+    roomLights.forEach((l) => { l.intensity = m.lamps * state.lampPower; });
+    mat3dFixture().emissiveIntensity = m.lamps > 0 ? 1.4 * state.lampPower : 0;
+    renderer.toneMappingExposure = m.exposure;
+    renderer.setClearColor(m.clear);
+    if (sky) {
+      sky.material.uniforms.top.value.setHex(m.top);
+      sky.material.uniforms.horizon.value.setHex(m.horizon);
+      sky.material.uniforms.ground.value.setHex(m.ground);
+    }
+    if (post) {
+      post.uniforms.exposure.value = m.exposure;
+      post.uniforms.warmth.value = m.warmth;
+    }
+    shadowDirty = true;
+    syncItemLights(lastItems);
+    syncEnv();
+  }
+
+  /* ---------- Шейдеры ---------- */
+  function setupPost() {
+    sky = new THREE.Mesh(new THREE.SphereGeometry(3500, 24, 16), new THREE.ShaderMaterial({ ...Shaders3D.SKY, uniforms: THREE.UniformsUtils.clone(Shaders3D.SKY.uniforms) }));
+    sky.position.set(270, 0, 240);
+    sky.visible = false;
+    scene.add(sky);
+    if (!renderer.capabilities.isWebGL2) { state.shaders = false; return; }
+    mainRT = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, samples: 4 });
+    depthRT = new THREE.WebGLRenderTarget(4, 4);
+    depthRT.depthTexture = new THREE.DepthTexture(4, 4);
+    depthRT.depthTexture.type = THREE.UnsignedIntType;
+    depthMat = new THREE.MeshBasicMaterial({ colorWrite: false });
+    post = new THREE.ShaderMaterial({ ...Shaders3D.POST, uniforms: THREE.UniformsUtils.clone(Shaders3D.POST.uniforms) });
+    post.uniforms.tColor.value = mainRT.texture;
+    post.uniforms.tDepth.value = depthRT.depthTexture;
+    fsCam = new THREE.Camera();
+    fsScene = new THREE.Scene();
+    fsScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), post));
+  }
+  function renderFrame() {
+    sky.visible = state.walking || state.mode !== 'day';
+    if (!state.shaders || !post) {
+      renderer.setRenderTarget(null);
+      renderer.render(scene, camera);
+      return;
+    }
+    renderer.setRenderTarget(mainRT);
+    renderer.clear();
+    renderer.render(scene, camera);
+    // Отдельный проход глубины: без сглаживания и без неба с рамкой выбора.
+    const skyWas = sky.visible, markerWas = marker.visible;
+    sky.visible = false;
+    marker.visible = false;
+    scene.overrideMaterial = depthMat;
+    renderer.setRenderTarget(depthRT);
+    renderer.clear();
+    renderer.render(scene, camera);
+    scene.overrideMaterial = null;
+    sky.visible = skyWas;
+    marker.visible = markerWas;
+    post.uniforms.near.value = camera.near;
+    post.uniforms.far.value = camera.far;
+    post.uniforms.focal.value = post.uniforms.resolution.value.y / (2 * Math.tan((camera.fov * Math.PI) / 360));
+    renderer.setRenderTarget(null);
+    renderer.render(fsScene, fsCam);
+  }
+
+  /* ---------- Прогулка от первого лица ---------- */
+  const walk = { x: 251, y: 560, eye: 160, yaw: 0, pitch: 0, keys: new Set(), raf: 0, last: 0, look: null };
+  function buildHud() {
+    const d = document.createElement('div');
+    d.className = 'walk-hud';
+    d.hidden = true;
+    d.innerHTML = `<div class="walk-top"><span class="walk-where"></span><span class="walk-help">WASD или стрелки: идти. Мышь: смотреть. Shift: быстрее. Esc: выйти</span><button data-w="exit">Выйти</button></div>
+      <div class="walk-pad"><button data-k="KeyW" aria-label="Вперёд">▲</button><button data-k="KeyA" aria-label="Влево">◀</button><button data-k="KeyS" aria-label="Назад">▼</button><button data-k="KeyD" aria-label="Вправо">▶</button></div>`;
+    d.addEventListener('click', (e) => { if (e.target.closest('[data-w="exit"]')) stopWalk(); });
+    d.addEventListener('pointerdown', (e) => {
+      const b = e.target.closest('[data-k]');
+      if (b) { e.preventDefault(); b.setPointerCapture(e.pointerId); walk.keys.add(b.dataset.k); }
+    });
+    const release = (e) => { const b = e.target.closest && e.target.closest('[data-k]'); if (b) walk.keys.delete(b.dataset.k); };
+    d.addEventListener('pointerup', release);
+    d.addEventListener('pointercancel', release);
+    return d;
+  }
+  const MOVE = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight']);
+  function bindWalk(dom) {
+    const turn = (dx, dy) => {
+      walk.yaw -= dx * 0.0024;
+      walk.pitch = clamp(walk.pitch - dy * 0.0024, -1.35, 1.35);
+    };
+    // Клик захватывает мышь; если браузер не дал, смотреть можно перетаскиванием.
+    dom.addEventListener('pointerdown', (e) => {
+      if (!state.walking) return;
+      walk.look = [e.clientX, e.clientY];
+      dom.setPointerCapture(e.pointerId);
+      if (e.pointerType === 'mouse' && dom.requestPointerLock && document.pointerLockElement !== dom) {
+        try {
+          const p = dom.requestPointerLock();
+          if (p && p.catch) p.catch(() => {});
+        } catch (err) { /* остаётся перетаскивание */ }
+      }
+    });
+    dom.addEventListener('pointermove', (e) => {
+      if (!state.walking) return;
+      if (document.pointerLockElement === dom) { turn(e.movementX, e.movementY); return; }
+      if (walk.look) { turn(e.clientX - walk.look[0], e.clientY - walk.look[1]); walk.look = [e.clientX, e.clientY]; }
+    });
+    const end = () => { walk.look = null; };
+    dom.addEventListener('pointerup', end);
+    dom.addEventListener('pointercancel', end);
+    window.addEventListener('keydown', (e) => {
+      if (!state.walking) return;
+      if (e.code === 'Escape') { if (document.pointerLockElement !== dom) stopWalk(); return; }
+      if (MOVE.has(e.code)) { walk.keys.add(e.code); e.preventDefault(); }
+      e.stopPropagation();
+    }, true);
+    window.addEventListener('keyup', (e) => { walk.keys.delete(e.code); }, true);
+    window.addEventListener('blur', () => walk.keys.clear());
+  }
+  function stepWalk(now) {
+    if (!state.walking) return;
+    const dt = Math.min((now - walk.last) / 1000, 0.05);
+    walk.last = now;
+    const k = walk.keys;
+    const f = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
+    const s = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
+    if (f || s) {
+      const speed = (k.has('ShiftLeft') || k.has('ShiftRight') ? 300 : 150) * dt / Math.hypot(f, s);
+      const sin = Math.sin(walk.yaw), cos = Math.cos(walk.yaw);
+      const dx = (-sin * f + cos * s) * speed, dy = (-cos * f - sin * s) * speed;
+      // Оси отдельно: упёршись в стену под углом, человек скользит вдоль неё.
+      if (Geo.canStand(APT, lastItems, walk.x + dx, walk.y)) walk.x += dx;
+      if (Geo.canStand(APT, lastItems, walk.x, walk.y + dy)) walk.y += dy;
+      updateWhere();
+    }
+    draw();
+    walk.raf = requestAnimationFrame(stepWalk);
+  }
+  function updateWhere() {
+    const r = Geo.roomAt(APT, walk.x, walk.y);
+    const el = hud.querySelector('.walk-where');
+    const t = r ? r.name : 'Дверной проём';
+    if (el.textContent !== t) el.textContent = t;
+  }
+  // Свободная точка в центре выбранной комнаты, иначе у входной двери.
+  function startPoint(roomId) {
+    const r = APT.rooms.find((x) => x.id === roomId);
+    if (r) {
+      const b = Geo.polyBox(r.poly);
+      const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+      for (let rad = 0; rad < 300; rad += 15) for (let a = 0; a < 6.28; a += 0.5) {
+        const x = cx + Math.cos(a) * rad, y = cy + Math.sin(a) * rad;
+        if (Geo.roomAt(APT, x, y) === r && Geo.canStand(APT, lastItems, x, y)) return { x, y, yaw: 0 };
+      }
+    }
+    return { x: APT.entry[0], y: APT.entry[1] - 25, yaw: 0 };
+  }
+  function startWalk(roomId) {
+    if (!state.ready || state.walking) return;
+    const p = startPoint(roomId);
+    Object.assign(walk, p, { pitch: -0.05, last: performance.now(), look: null });
+    walk.keys.clear();
+    state.walking = true;
+    camera.fov = 68;
+    camera.near = 4;
+    camera.updateProjectionMatrix();
+    marker.visible = false;
+    hud.hidden = false;
+    updateWhere();
+    buildStatic();
+    applyLighting();
+    if (handlers.walkChange) handlers.walkChange(true);
+    walk.raf = requestAnimationFrame(stepWalk);
+  }
+  function stopWalk() {
+    if (!state.walking) return;
+    state.walking = false;
+    cancelAnimationFrame(walk.raf);
+    if (document.pointerLockElement) document.exitPointerLock();
+    camera.fov = 38;
+    camera.near = 5;
+    camera.updateProjectionMatrix();
+    hud.hidden = true;
+    buildStatic();
+    applyLighting();
+    if (handlers.walkChange) handlers.walkChange(false);
+    update(lastItems, selectedId);
+  }
+  function setLighting(mode) { state.mode = mode; if (state.ready) { applyLighting(); draw(); } }
+  function setLampPower(v) { state.lampPower = v; if (state.ready) { applyLighting(); draw(); } }
+  function setShaders(v) { state.shaders = v && !!post; draw(); }
 
   /* ---------- Снаружи ---------- */
   function setTheme(t) {
@@ -438,9 +733,10 @@
   function floorPoint(e) { return state.ready ? hitPlane(e.clientX, e.clientY, 0) : null; }
 
   window.View3D = {
-    mount, update, setTheme, setCut, setAutoHide, rebuildStatic, resize, draw, focus, png, floorPoint,
+    mount, update, setTheme, setCut, setLighting, setLampPower, setShaders, startWalk, stopWalk,
+    get walking() { return state.walking; }, setAutoHide, rebuildStatic, resize, draw, focus, png, floorPoint,
     setHandlers: (h) => { handlers = h; },
     get ready() { return state.ready; },
-    _debug: { orbit, draw },
+    _debug: { orbit, draw, walk },
   };
 })();

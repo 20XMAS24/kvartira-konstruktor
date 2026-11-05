@@ -225,6 +225,19 @@
     return reached;
   }
 
+  // Можно ли стоять в точке (для прогулки): тело — круг радиусом r, входная дверь закрыта.
+  function canStand(apt, items, x, y, r = 18) {
+    const inside = (px, py) => roomAt(apt, px, py)
+      || apt.openings.some((o) => o.type !== 'window' && o.type !== 'entry'
+        && px >= o.rect[0] && px <= o.rect[2] && py >= o.rect[1] && py <= o.rect[3]);
+    const k = r * 0.707;
+    const ring = [[0, 0], [r, 0], [-r, 0], [0, r], [0, -r], [k, k], [-k, k], [k, -k], [-k, -k]];
+    if (!ring.every(([dx, dy]) => inside(x + dx, y + dy))) return false;
+    const hits = (b) => distToBox(x, y, b) < r;
+    if (apt.fixed.some((f) => hits(fixedBox(f)))) return false;
+    return !items.some((it) => it.role !== 'point' && it.kind !== 'lamp' && (it.z || 0) < 180 && hits(box(it)));
+  }
+
   function allOutlets(apt, items) {
     const custom = items.filter((it) => it.role === 'point').map((it) => {
       const b = box(it);
@@ -379,6 +392,6 @@
 
   return {
     box, frontDir, overlap, pointInPoly, roomAt, roomOf, boxInPoly, polyArea, polyBox, fixedBox,
-    wallBoxes, doorState, swingBox, clearance, reachable, baseMask, runChecks, allOutlets, isFloorItem, cm,
+    wallBoxes, doorState, swingBox, clearance, reachable, canStand, baseMask, runChecks, allOutlets, isFloorItem, cm,
   };
 });

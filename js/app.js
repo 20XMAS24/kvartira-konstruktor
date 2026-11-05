@@ -411,6 +411,7 @@
     ['props', 'checks', 'spec', 'designs'].forEach((n) => { $('tab-' + n).hidden = n !== t; });
   }
   function showView(v) {
+    if (v !== 'd3') View3D.stopWalk();
     S.view = v;
     document.querySelectorAll('#viewTabs button').forEach((b) => b.classList.toggle('on', b.dataset.view === v));
     $('planPane').hidden = v !== 'plan';
@@ -672,11 +673,24 @@
     render3d();
   });
   $('autoHide').addEventListener('change', (e) => View3D.setAutoHide(e.target.checked));
+  $('lightMode').addEventListener('change', (e) => View3D.setLighting(e.target.value));
+  $('lampPower').addEventListener('input', (e) => View3D.setLampPower(+e.target.value));
+  $('shaders').addEventListener('change', (e) => View3D.setShaders(e.target.checked));
+  $('walkBtn').addEventListener('click', (e) => {
+    e.target.blur();
+    S.sel = null;
+    View3D.startWalk(S.focus === 'all' ? activeWalkRoom() : S.focus);
+    renderSide();
+  });
+
+  // Прогулка начинается у входной двери, если комната не выбрана.
+  const activeWalkRoom = () => null;
 
   /* ---------- Правка в 3D ---------- */
   let drag3d = null;
   View3D.setHandlers({
     doors: () => S.doors,
+    walkChange(on) { $('walkBtn').disabled = on; },
     select(id) {
       S.sel = id ? { type: 'item', id } : null;
       if (id) showTab('props');
