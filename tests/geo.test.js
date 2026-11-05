@@ -178,3 +178,37 @@ test('разметка всех предметов годится для экс�
     }
   }
 });
+
+const DESIGNS = require('../js/designs.js');
+const fs = require('node:fs');
+const path = require('node:path');
+
+test('пять дизайнов проходят проверки без ошибок и замечаний', () => {
+  assert.equal(DESIGNS.length, 5);
+  for (const d of DESIGNS) {
+    const res = Geo.runChecks(APT, d.items.map(([id, x, y, rot]) => make(id, x, y, rot)));
+    assert.deepEqual(res.filter((r) => r.level !== 'info').map((r) => r.text), [], d.title);
+  }
+});
+
+test('дизайны различаются планировкой и задают отделку всех комнат', () => {
+  const keys = DESIGNS.map((d) => JSON.stringify(d.items));
+  assert.equal(new Set(keys).size, DESIGNS.length);
+  for (const d of DESIGNS) {
+    for (const r of APT.rooms) {
+      const f = d.theme.floors[r.id];
+      assert.ok(f, `${d.id}: нет пола для ${r.id}`);
+      if (!f.tex) continue; // ровное покрытие
+      for (const m of ['Diffuse', 'nor_gl', 'Rough']) {
+        assert.ok(fs.existsSync(path.join(__dirname, '..', 'assets/textures', `${f.tex}_${m}.jpg`)), `${f.tex}_${m}`);
+      }
+    }
+  }
+});
+
+test('у каждой привязанной модели есть файл и предмет в каталоге', () => {
+  for (const [id, m] of Object.entries(CATALOG.models)) {
+    assert.ok(CATALOG.some((c) => c.id === id), id);
+    assert.ok(fs.existsSync(path.join(__dirname, '..', 'assets/models', `${m.file}.glb`)), m.file);
+  }
+});

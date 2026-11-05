@@ -85,5 +85,21 @@
   add('Свои замеры', 'outlet30', 'Розетка низкая', 8, 3, 8, 'point', 'outlet', '#d9542b', { z: 30 });
   add('Свои замеры', 'outlet110', 'Розетка над столешницей', 8, 3, 8, 'point', 'outlet', '#d9542b', { z: 111 });
 
+  // Настоящие модели (CC0, Poly Haven): файл в assets/models и поворот, чтобы фасад смотрел на +z.
+  const sofa = { file: 'sofa_02' }, table = { file: 'wooden_table_02' }, side = { file: 'side_table_01' }, stove = { file: 'electric_stove' };
+  list.models = {
+    sofa200: sofa, sofa160: sofa,
+    armchair: { file: 'modern_arm_chair_01' },
+    chair: { file: 'dining_chair_02' },
+    table80: table, table120: table, desk120: table, desk140: table,
+    tv160: { file: 'modern_wooden_cabinet' },
+    dresser: { file: 'painted_wooden_cabinet' },
+    shelf80: { file: 'wooden_display_shelves_01' },
+    rack80: { file: 'steel_frame_shelves_02' },
+    nightstand: side, balctable: side,
+    stove60: stove, stove50: stove,
+    bench: { file: 'Ottoman_01' },
+  };
+
   return list;
 });

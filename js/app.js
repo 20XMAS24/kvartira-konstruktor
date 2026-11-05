@@ -8,7 +8,7 @@
   const maskCache = Geo.baseMask(APT);
 
   const S = {
-    items: [], doors: {}, minPass: {},
+    items: [], doors: {}, minPass: {}, design: null,
     sel: null,          // { type: 'item' | 'outlet' | 'opening', id }
     view: 'plan', tab: 'props', focus: 'all',
     wallRoom: 'kitchen', wallEdge: 3,
@@ -20,10 +20,10 @@
   let seq = 1;
   const newId = () => `i${Date.now().toString(36)}${(seq++).toString(36)}`;
 
-  const snapshot = () => JSON.stringify({ items: S.items, doors: S.doors, minPass: S.minPass });
+  const snapshot = () => JSON.stringify({ items: S.items, doors: S.doors, minPass: S.minPass, design: S.design });
   function restore(json) {
     const d = JSON.parse(json);
-    S.items = d.items; S.doors = d.doors || {}; S.minPass = d.minPass || {};
+    S.items = d.items; S.doors = d.doors || {}; S.minPass = d.minPass || {}; S.design = d.design || null;
     if (S.sel && S.sel.type === 'item' && !S.items.some((i) => i.id === S.sel.id)) S.sel = null;
   }
   function commit(before) {
@@ -46,8 +46,24 @@
   }
   function loadPreset(name) {
     S.items = PRESETS[name].items.map(([id, x, y, rot]) => makeItem(id, x, y, rot));
+    S.design = null;
     S.sel = null;
   }
+  // Цвет мебели в дизайне зависит от типа предмета; техника и сантехника остаются своими.
+  function designColor(c, paint) {
+    if (c.kind === 'sofa' || c.kind === 'bed' || c.kind === 'chair') return paint.soft;
+    if (c.kind === 'table') return paint.table;
+    if (c.role === 'base' || c.role === 'upper' || c.role === 'tall' || c.kind === 'cabinet' || c.kind === 'wardrobe') return paint.cabinet;
+    return c.color;
+  }
+  function designItems(d) {
+    return d.items.map(([id, x, y, rot]) => {
+      const it = makeItem(id, x, y, rot);
+      if (it.role !== 'plumbing' && it.kind !== 'hood') it.color = designColor(CAT.get(id), d.paint);
+      return it;
+    });
+  }
+  const currentTheme = () => { const d = DESIGNS.find((x) => x.id === S.design); return d ? d.theme : null; };
 
   // Проверка файла: всё, что не похоже на предмет, отбрасываем.
   function sanitize(data) {
@@ -66,7 +82,12 @@
         price: i.price != null ? Math.max(0, num(i.price, 0)) : undefined,
       };
     });
-    return { items, doors: data.doors && typeof data.doors === 'object' ? data.doors : {}, minPass: data.minPass && typeof data.minPass === 'object' ? data.minPass : {} };
+    return {
+      items,
+      doors: data.doors && typeof data.doors === 'object' ? data.doors : {},
+      minPass: data.minPass && typeof data.minPass === 'object' ? data.minPass : {},
+      design: DESIGNS.some((d) => d.id === data.design) ? data.design : null,
+    };
   }
 
   /* ---------- Камера плана ---------- */
@@ -134,7 +155,7 @@
     S.guides = [];
     if (!freeMove) {
       const { xs, ys } = snapCandidates(it, room);
-      const thr = Math.max(7, 9 * S.cam.k);
+      const thr = S.view === 'plan' && S.cam ? Math.max(7, 9 * S.cam.k) : 8;
       const sx = bestSnap(x, x + b.w, xs, thr), sy = bestSnap(y, y + b.d, ys, thr);
       if (sx) { x += sx.d; S.guides.push({ axis: 'x', v: sx.v }); } else x = Math.round(x / 5) * 5;
       if (sy) { y += sy.d; S.guides.push({ axis: 'y', v: sy.v }); } else y = Math.round(y / 5) * 5;
@@ -219,12 +240,15 @@
     if (S.view !== 'd3') return;
     View3D.mount($('d3'));
     View3D.resize();
-    View3D.update(S.items, S.sel && S.sel.type === 'item' ? S.sel.id : null);
+    View3D.update(S.items, S.sel && S.sel.type === 'item' ? S.sel.id : null, issuesMap());
   }
   function runChecks() {
     S.checks = Geo.runChecks(APT, S.items.filter((i) => !i._new), { doors: S.doors, minPass: S.minPass, maskCache });
   }
   function refresh() {
+    const theme = currentTheme();
+    Draw.setTheme(theme);
+    View3D.setTheme(theme);
     runChecks();
     renderPlan(); renderWall(); render3d();
     renderSide(); renderStatus();
@@ -278,6 +302,7 @@
           <label>Низ от пола, см<input type="number" min="0" step="0.5" data-f="z" value="${it.z || 0}"></label>`}
           <label>X, см${rb ? ` <span class="muted">от левой стены: ${cm(b.x0 - rb.x0)}</span>` : ''}<input type="number" step="0.5" data-f="x" value="${it.x}"></label>
           <label>Y, см${rb ? ` <span class="muted">от верхней: ${cm(b.y0 - rb.y0)}</span>` : ''}<input type="number" step="0.5" data-f="y" value="${it.y}"></label>
+          ${isPoint ? '' : `<label>Цвет<input type="color" data-f="color" value="${/^#[0-9a-f]{6}$/i.test(it.color || '') ? it.color : '#cccccc'}"></label>`}
           ${isPoint ? '' : `<label class="full">Цена, ₽<input type="number" min="0" step="100" data-f="price" value="${it.price != null ? it.price : ''}" placeholder="для сметы"></label>`}
         </div>
         <div class="row">
@@ -359,6 +384,23 @@
     if (!typing || S.tab !== 'props') renderProps();
     if (!typing || S.tab !== 'checks') renderChecks();
     renderSpec();
+    document.querySelectorAll('#tab-designs .design').forEach((b) => b.classList.toggle('on', b.dataset.design === S.design));
+  }
+  function renderDesigns() {
+    const b = Draw.planBounds();
+    const u = (b.x1 - b.x0) / 150;
+    const layers = { upper: false, outlets: false, dims: false, hints: false };
+    const cards = DESIGNS.map((d) => {
+      Draw.setTheme(d.theme);
+      const inner = Draw.planMarkup({ u, items: designItems(d), doors: {}, layers, guides: [], issues: new Map() });
+      return `<button class="design" data-design="${d.id}">
+        <svg viewBox="${b.x0} ${b.y0} ${b.x1 - b.x0} ${b.y1 - b.y0}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">${inner}</svg>
+        <strong>${esc(d.title)}</strong><p>${esc(d.desc)}</p>
+        <span class="swatches">${d.swatches.map((c) => `<i style="background:${c}"></i>`).join('')}</span>
+      </button>`;
+    }).join('');
+    Draw.setTheme(currentTheme());
+    $('tab-designs').innerHTML = `<h3>Дизайны</h3><p class="muted">Выбор заменяет текущую расстановку. Вернуть прежнюю можно кнопкой «Отменить». Лучше всего смотреть в 3D.</p>${cards}`;
   }
 
   /* ---------- Действия ---------- */
@@ -366,7 +408,7 @@
   function showTab(t) {
     S.tab = t;
     document.querySelectorAll('#sideTabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
-    ['props', 'checks', 'spec'].forEach((n) => { $('tab-' + n).hidden = n !== t; });
+    ['props', 'checks', 'spec', 'designs'].forEach((n) => { $('tab-' + n).hidden = n !== t; });
   }
   function showView(v) {
     S.view = v;
@@ -544,8 +586,8 @@
   });
   window.addEventListener('pointermove', (e) => {
     if (!cardDrag || cardDrag.touch) return;
-    if (S.view !== 'plan') return;
-    const r = svg.getBoundingClientRect();
+    if (S.view === 'wall') return;
+    const r = (S.view === 'plan' ? svg : $('d3')).getBoundingClientRect();
     const over = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
     if (over && !cardDrag.it) {
       cardDrag.it = makeItem(cardDrag.cat);
@@ -554,13 +596,15 @@
       S.sel = { type: 'item', id: cardDrag.it.id };
     }
     if (cardDrag.it) {
-      placeAt(cardDrag.it, S.cam.x + (e.clientX - r.left) * S.cam.k, S.cam.y + (e.clientY - r.top) * S.cam.k, e.altKey);
-      renderPlan();
+      const p = S.view === 'plan'
+        ? { x: S.cam.x + (e.clientX - r.left) * S.cam.k, y: S.cam.y + (e.clientY - r.top) * S.cam.k }
+        : (() => { const f = View3D.floorPoint(e); return f && { x: f.x, y: f.z }; })();
+      if (p) placeAt(cardDrag.it, p.x, p.y, e.altKey);
       if (!over) {
         S.items = S.items.filter((i) => i !== cardDrag.it);
         S.sel = null; cardDrag.it = null; S.guides = [];
-        renderPlan();
       }
+      renderPlan(); render3d();
     }
   });
   window.addEventListener('pointerup', (e) => {
@@ -627,6 +671,51 @@
     View3D.setCut(+e.target.value);
     render3d();
   });
+  $('autoHide').addEventListener('change', (e) => View3D.setAutoHide(e.target.checked));
+
+  /* ---------- Правка в 3D ---------- */
+  let drag3d = null;
+  View3D.setHandlers({
+    doors: () => S.doors,
+    select(id) {
+      S.sel = id ? { type: 'item', id } : null;
+      if (id) showTab('props');
+      runChecks(); render3d(); renderSide();
+    },
+    dragStart(id) { drag3d = { it: S.items.find((i) => i.id === id), before: snapshot() }; },
+    dragMove(x, y, alt) {
+      if (!drag3d) return;
+      placeAt(drag3d.it, x, y, alt);
+      runChecks(); render3d(); renderStatus();
+    },
+    dragEnd() {
+      if (!drag3d) return;
+      S.guides = [];
+      commit(drag3d.before);
+      drag3d = null;
+    },
+    action(a) {
+      if (a === 'rotate') rotateSelected();
+      if (a === 'dup') duplicateSelected();
+      if (a === 'del') deleteSelected();
+    },
+    liftStart() {
+      const it = selectedItem();
+      if (it) drag3d = { it, before: snapshot(), z0: it.z || 0 };
+    },
+    liftMove(dz) {
+      if (!drag3d || drag3d.z0 === undefined) return;
+      const it = drag3d.it;
+      it.z = Math.max(0, Math.min(APT.CEILING - it.h, Math.round((drag3d.z0 + dz) / 1)));
+      runChecks(); render3d(); renderStatus();
+    },
+    liftEnd() {
+      if (!drag3d) return;
+      commit(drag3d.before);
+      drag3d = null;
+    },
+  });
+  if (!Models3D.useAssets) $('d3Hint').textContent = 'Файл открыт с диска: модели и текстуры видны только на сайте или через локальный сервер.';
 
   function undo() {
     if (!history.past.length) return;
@@ -657,7 +746,7 @@
     if (!f) return;
     try {
       const data = sanitize(JSON.parse(await f.text()));
-      mutate(() => { S.items = data.items; S.doors = data.doors; S.minPass = data.minPass; S.sel = null; });
+      mutate(() => { S.items = data.items; S.doors = data.doors; S.minPass = data.minPass; S.design = data.design; S.sel = null; });
     } catch (err) {
       alert('Не получилось открыть файл: ' + err.message);
     }
@@ -665,7 +754,7 @@
   document.querySelectorAll('[data-preset]').forEach((b) => {
     b.onclick = () => { closeMenu(); mutate(() => loadPreset(b.dataset.preset)); };
   });
-  $('clearAll').onclick = () => { closeMenu(); mutate(() => { S.items = []; S.sel = null; }); };
+  $('clearAll').onclick = () => { closeMenu(); mutate(() => { S.items = []; S.design = null; S.sel = null; }); };
 
   $('tab-props').addEventListener('click', (e) => {
     const f = e.target.closest('[data-focus]');
@@ -684,6 +773,7 @@
           ? { ...cur, hinge: cur.hinge === 'a' ? 'b' : 'a' }
           : { ...cur, dir: [-cur.dir[0], -cur.dir[1]] } };
       });
+      View3D.rebuildStatic();
     }
   });
   $('tab-props').addEventListener('change', (e) => {
@@ -691,6 +781,7 @@
     if (!f || !it) return;
     mutate(() => {
       if (f === 'name') { it.name = e.target.value.slice(0, 80) || it.name; return; }
+      if (f === 'color') { it.color = e.target.value; return; }
       const v = parseFloat(e.target.value);
       if (f === 'price') { if (Number.isFinite(v) && v >= 0) it.price = v; else delete it.price; return; }
       if (!Number.isFinite(v)) return;
@@ -700,6 +791,13 @@
       else it[f] = v;
     });
     e.target.blur();
+  });
+  $('tab-designs').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-design]');
+    if (!b) return;
+    const d = DESIGNS.find((x) => x.id === b.dataset.design);
+    mutate(() => { S.items = designItems(d); S.design = d.id; S.sel = null; });
+    if (S.view === 'd3') View3D.focus(focusBounds());
   });
   $('tab-checks').addEventListener('click', (e) => {
     const b = e.target.closest('[data-check]');
@@ -743,12 +841,13 @@
 
   /* ---------- Запуск ---------- */
   renderCatalog();
+  renderDesigns();
   let stored = null;
   try { stored = localStorage.getItem(STORE); } catch (e) { /* хранилище недоступно */ }
   try {
     if (stored) {
       const d = sanitize(JSON.parse(stored));
-      S.items = d.items; S.doors = d.doors; S.minPass = d.minPass;
+      S.items = d.items; S.doors = d.doors; S.minPass = d.minPass; S.design = d.design;
     } else loadPreset('example');
   } catch (e) { loadPreset('example'); }
   refresh();

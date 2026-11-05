@@ -7,6 +7,7 @@
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const n = (v) => Math.round(v * 100) / 100;
+  let colorOf = (r) => r.color;
 
   function text(x, y, str, size, opts = {}) {
     const { fill = INK, anchor = 'middle', weight, rotate, halo } = opts;
@@ -132,7 +133,7 @@
       const off = -9 * u; // чуть внутрь комнаты, иначе подпись ложится на соседнюю стену
       const mx = (ax + bx) / 2 + nx * off, my = (ay + by) / 2 + ny * off;
       const vertical = Math.abs(by - ay) > Math.abs(bx - ax);
-      s += text(mx, my, cm(len), 10 * u, { fill: MUTED, rotate: vertical ? -90 : 0, halo: room.color });
+      s += text(mx, my, cm(len), 10 * u, { fill: MUTED, rotate: vertical ? -90 : 0, halo: colorOf(room) });
     }
     return s;
   }
@@ -158,7 +159,7 @@
       s += `<rect x="${n(w.x0)}" y="${n(w.y0)}" width="${n(w.x1 - w.x0)}" height="${n(w.y1 - w.y0)}" fill="${WALL}" stroke="${WALL}" stroke-width="${n(0.6 * u)}"/>`;
     });
     APT.rooms.forEach((r) => {
-      s += `<polygon data-room="${r.id}" points="${r.poly.map((p) => p.join(',')).join(' ')}" fill="${r.color}"/>`;
+      s += `<polygon data-room="${r.id}" points="${r.poly.map((p) => p.join(',')).join(' ')}" fill="${colorOf(r)}"/>`;
     });
     APT.rooms.forEach((r) => {
       const b = polyBox(r.poly);
@@ -223,7 +224,7 @@
     const D = (x, y) => (x - a[0]) * inward[0] + (y - a[1]) * inward[1];
     const Y = (h) => C - h;
     const vb = { x: -pad, y: -22, w: L + pad * 2, h: C + 22 + bottom };
-    let s = `<rect x="0" y="0" width="${n(L)}" height="${C}" fill="${room.color}" stroke="${WALL}" stroke-width="2"/>`;
+    let s = `<rect x="0" y="0" width="${n(L)}" height="${C}" fill="${colorOf(room)}" stroke="${WALL}" stroke-width="2"/>`;
 
     const spanOf = (bx) => {
       const us = [U(bx.x0, bx.y0), U(bx.x1, bx.y0), U(bx.x0, bx.y1), U(bx.x1, bx.y1)];
@@ -290,5 +291,7 @@
     return { markup: s, vb };
   }
 
-  window.Draw = { planMarkup, planBounds, elevationMarkup, esc };
+  // theme дизайна красит полы на плане; null возвращает обычные цвета.
+  function setTheme(t) { colorOf = t ? (r) => t.floors[r.id].plan : (r) => r.color; }
+  window.Draw = { planMarkup, planBounds, elevationMarkup, esc, setTheme };
 })();

@@ -67,8 +67,9 @@
     <div class="pane" id="d3Pane" hidden>
       <div class="toolbar">
         <label class="field">Высота стен <input type="range" id="cut" min="40" max="254" step="2" value="254"> <output id="cutVal">254</output></label>
+        <label><input type="checkbox" id="autoHide" checked> Скрывать ближние стены</label>
         <span class="spacer"></span>
-        <span class="hint">Тянуть: вращать. Shift или правая кнопка: двигать. Колесо: масштаб.</span>
+        <span class="hint" id="d3Hint">Предмет: нажать и тянуть. Пустое место: вращать. Shift: сдвиг вида. Колесо: масштаб.</span>
       </div>
       <div id="d3" class="d3"></div>
     </div>
@@ -80,19 +81,25 @@
       <button data-tab="props" class="on">Свойства</button>
       <button data-tab="checks">Проверки <span id="checkBadge" class="badge"></span></button>
       <button data-tab="spec">Смета</button>
+      <button data-tab="designs">Дизайны</button>
     </nav>
     <div id="tab-props" class="tab"></div>
     <div id="tab-checks" class="tab" hidden></div>
     <div id="tab-spec" class="tab" hidden></div>
+    <div id="tab-designs" class="tab" hidden></div>
   </aside>
 </main>
 
 <script src="vendor/three.min.js"></script>
+<script src="vendor/GLTFLoader.js"></script>
+<script src="vendor/RoomEnvironment.js"></script>
 <script src="js/apartment.js"></script>
 <script src="js/catalog.js"></script>
 <script src="js/presets.js"></script>
+<script src="js/designs.js"></script>
 <script src="js/geo.js"></script>
 <script src="js/draw.js"></script>
+<script src="js/models3d.js"></script>
 <script src="js/view3d.js"></script>
 <script src="js/app.js"></script>
 </body>
