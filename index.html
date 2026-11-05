@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Конструктор квартиры</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<header class="top">
+  <strong class="brand">Конструктор квартиры</strong>
+  <nav class="seg" id="viewTabs" aria-label="Вид">
+    <button data-view="plan" class="on">План</button>
+    <button data-view="wall">Стены</button>
+    <button data-view="d3">3D</button>
+  </nav>
+  <label class="field">Показать
+    <select id="focus"></select>
+  </label>
+  <span class="spacer"></span>
+  <button id="undo" title="Отменить (Ctrl+Z)">Отменить</button>
+  <button id="redo" title="Вернуть (Ctrl+Shift+Z)">Вернуть</button>
+  <details class="menu" id="fileMenu">
+    <summary>Файл</summary>
+    <div class="menu-body">
+      <button id="savePng">Картинка PNG</button>
+      <button id="saveJson">Сохранить раскладку (JSON)</button>
+      <button id="loadJson">Открыть раскладку…</button>
+      <hr>
+      <button data-preset="example">Пример всей квартиры</button>
+      <button data-preset="sanitary">Только сантехника</button>
+      <button id="clearAll">Очистить всё</button>
+    </div>
+  </details>
+  <input type="file" id="fileInput" accept="application/json,.json" hidden>
+</header>
+
+<main class="layout">
+  <aside class="catalog" aria-label="Каталог">
+    <input id="search" type="search" placeholder="Найти: шкаф, кровать…" aria-label="Поиск по каталогу">
+    <div id="catalogList"></div>
+    <p class="hint">Перетащите на план или нажмите, чтобы поставить в свободное место.</p>
+  </aside>
+
+  <section class="stage">
+    <div class="pane" id="planPane">
+      <div class="toolbar">
+        <label><input type="checkbox" id="layerUpper" checked> Верхние шкафы</label>
+        <label><input type="checkbox" id="layerOutlets" checked> Розетки</label>
+        <label><input type="checkbox" id="layerDims" checked> Размеры</label>
+        <label><input type="checkbox" id="layerHints"> Значки с плана</label>
+        <span class="spacer"></span>
+        <button id="zoomOut" aria-label="Уменьшить">−</button>
+        <button id="zoomFit">Весь план</button>
+        <button id="zoomIn" aria-label="Увеличить">+</button>
+      </div>
+      <svg id="plan" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="План квартиры"></svg>
+    </div>
+    <div class="pane" id="wallPane" hidden>
+      <div class="toolbar">
+        <label class="field">Комната <select id="wallRoom"></select></label>
+        <div class="chips" id="wallChips"></div>
+      </div>
+      <svg id="elev" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Развёртка стены"></svg>
+      <p class="hint under">Стена показана так, как вы её видите, стоя в комнате лицом к ней.</p>
+    </div>
+    <div class="pane" id="d3Pane" hidden>
+      <div class="toolbar">
+        <label class="field">Высота стен <input type="range" id="cut" min="40" max="254" step="2" value="254"> <output id="cutVal">254</output></label>
+        <span class="spacer"></span>
+        <span class="hint">Тянуть: вращать. Shift или правая кнопка: двигать. Колесо: масштаб.</span>
+      </div>
+      <div id="d3" class="d3"></div>
+    </div>
+    <footer class="status" id="status"></footer>
+  </section>
+
+  <aside class="side" aria-label="Панель">
+    <nav class="seg wide" id="sideTabs">
+      <button data-tab="props" class="on">Свойства</button>
+      <button data-tab="checks">Проверки <span id="checkBadge" class="badge"></span></button>
+      <button data-tab="spec">Смета</button>
+    </nav>
+    <div id="tab-props" class="tab"></div>
+    <div id="tab-checks" class="tab" hidden></div>
+    <div id="tab-spec" class="tab" hidden></div>
+  </aside>
+</main>
+
+<script src="vendor/three.min.js"></script>
+<script src="js/apartment.js"></script>
+<script src="js/catalog.js"></script>
+<script src="js/presets.js"></script>
+<script src="js/geo.js"></script>
+<script src="js/draw.js"></script>
+<script src="js/view3d.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
